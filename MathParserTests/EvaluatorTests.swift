@@ -21,6 +21,12 @@ class EvaluatorTests: XCTestCase {
         XCTAssertEqual(d, 42)
     }
     
+    func testVariableWithNestedExpression() {
+        guard let sub = XCTAssertNoThrows(try Expression(string: "21 * 2")) else { return }
+        guard let d = XCTAssertNoThrows(try "$foo".evaluate(["foo": sub])) else { return }
+        XCTAssertEqual(d, 42)
+    }
+    
     func testFunction() {
         guard let d = XCTAssertNoThrows(try "1 + 2".evaluate()) else { return }
         XCTAssertEqual(d, 3)
@@ -30,7 +36,7 @@ class EvaluatorTests: XCTestCase {
         var eval = Evaluator()
         
         struct Resolver: VariableResolver {
-            private func resolveVariable(variable: String) -> Double? {
+            func resolveVariable(_ variable: String) -> Double? {
                 return 42
             }
         }
@@ -47,7 +53,7 @@ class EvaluatorTests: XCTestCase {
         var eval = Evaluator()
         
         struct Resolver: FunctionResolver {
-            private func resolveFunction(function: String, arguments: Array<Expression>, substitutions: Substitutions, evaluator: Evaluator) throws -> Double? {
+            func resolveFunction(_ function: String, state: EvaluationState) throws -> Double? {
                 return 42
             }
         }
@@ -64,7 +70,7 @@ class EvaluatorTests: XCTestCase {
         var eval = Evaluator()
         
         struct Overrider: FunctionOverrider {
-            private func overrideFunction(function: String, arguments: Array<Expression>, substitutions: Substitutions, evaluator: Evaluator) throws -> Double? {
+            func overrideFunction(_ function: String, state: EvaluationState) throws -> Double? {
                 return 42
             }
         }
@@ -81,12 +87,12 @@ class EvaluatorTests: XCTestCase {
         do {
             let _ = try "$foo".evaluate()
         } catch let e {
-            guard let error = e as? EvaluationError else {
+            guard let error = e as? MathParserError else {
                 XCTFail("Unexpected error: \(e)")
                 return
             }
             
-            guard case let .UnknownVariable(v) = error else {
+            guard case let .unknownVariable(v) = error.kind else {
                 XCTFail("Unexpected error: \(error)")
                 return
             }
@@ -99,12 +105,12 @@ class EvaluatorTests: XCTestCase {
         do {
             let _ = try "foo()".evaluate()
         } catch let e {
-            guard let error = e as? EvaluationError else {
+            guard let error = e as? MathParserError else {
                 XCTFail("Unexpected error: \(e)")
                 return
             }
             
-            guard case let .UnknownFunction(f) = error else {
+            guard case let .unknownFunction(f) = error.kind else {
                 XCTFail("Unexpected error: \(error)")
                 return
             }
@@ -170,9 +176,9 @@ class EvaluatorTests: XCTestCase {
         TestString("csc(π/4)", value: sqrt(2))
         TestString("sec(π/4)", value: sqrt(2))
         TestString("cotan(π/4)", value: 1)
-        TestString("acsc(sqrt(2))", value: M_PI_4)
-        TestString("asec(sqrt(2))", value: M_PI_4)
-        TestString("acotan(1)", value: M_PI_4)
+        TestString("acsc(sqrt(2))", value: Double.pi / 4)
+        TestString("asec(sqrt(2))", value: Double.pi / 4)
+        TestString("acotan(1)", value: Double.pi / 4)
     }
     
     func testHyperbolicTrigonometricFunctions() {
@@ -210,17 +216,17 @@ class EvaluatorTests: XCTestCase {
         TestString("exsec(1)", value: 0.850815717680925617911753241398650193470396655094009298835158)
         TestString("excsc(1)", value: 0.188395105778121216261599452374551003527829834097962625265253)
         TestString("crd(1.287002217586570)", value: 1.20000000000000084)
-        TestString("dtor(45)", value: M_PI_4)
+        TestString("dtor(45)", value: Double.pi / 4)
         TestString("rtod(π/4)", value: 45)
     }
     
     func testConstantFunctions() {
         TestString("phi", value: 1.6180339887498948)
-        TestString("pi", value: M_PI)
-        TestString("pi_2", value: M_PI_2)
-        TestString("pi_4", value: M_PI_4)
-        TestString("tau", value: 2 * M_PI)
-        TestString("sqrt2", value: M_SQRT2)
+        TestString("pi", value: Double.pi)
+        TestString("pi_2", value: Double.pi / 2)
+        TestString("pi_4", value: Double.pi / 4)
+        TestString("tau", value: 2 * Double.pi)
+        TestString("sqrt2", value: 2.squareRoot())
         TestString("e", value: M_E)
         TestString("log2e", value: M_LOG2E)
         TestString("log10e", value: M_LOG10E)
@@ -259,7 +265,7 @@ class EvaluatorTests: XCTestCase {
     }
     
     func testCustomFunction() {
-        let function = Function(name: "foo", evaluator: { (args, subs, eval) throws -> Double in
+        let function = Function(name: "foo", evaluator: { state throws -> Double in
             return 42
         })
         
@@ -271,7 +277,7 @@ class EvaluatorTests: XCTestCase {
     }
     
     func testBadCustomFunction() {
-        let function = Function(name: "add", evaluator: { (args, subs, eval) throws -> Double in
+        let function = Function(name: "add", evaluator: { state throws -> Double in
             return 42
         })
         
@@ -281,24 +287,23 @@ class EvaluatorTests: XCTestCase {
     
     func testLogic() {
         let operatorSet = OperatorSet()
-        operatorSet.addTokens(["and"], forOperator: Operator(builtInOperator: .LogicalAnd))
-        operatorSet.addTokens(["or"], forOperator: Operator(builtInOperator: .LogicalOr))
-        operatorSet.addTokens(["is"], forOperator: Operator(builtInOperator: .LogicalEqual))
-        operatorSet.addTokens(["is not"], forOperator: Operator(builtInOperator: .LogicalNotEqual))
+        operatorSet.addTokens(["and"], forOperator: Operator(builtInOperator: .logicalAnd))
+        operatorSet.addTokens(["or"], forOperator: Operator(builtInOperator: .logicalOr))
+        operatorSet.addTokens(["is"], forOperator: Operator(builtInOperator: .logicalEqual))
+        operatorSet.addTokens(["is not"], forOperator: Operator(builtInOperator: .logicalNotEqual))
         
         
         let tests: Dictionary<String, Double> = [
             "true and true is true": 1,
             "true and false is not true": 1,
             "true and false is true": 0,
-            "false and false is false": 1,
             "true or false is true": 1
         ]
         
         for (test, value) in tests {
             guard let e = XCTAssertNoThrows(try Expression(string: test, operatorSet: operatorSet)) else { return }
-            guard let d = XCTAssertNoThrows(try Evaluator.defaultEvaluator.evaluate(e)) else { return }
-            XCTAssertEqual(d, value)
+            guard let d = XCTAssertNoThrows(try Evaluator.default.evaluate(e)) else { return }
+            XCTAssertEqual(d, value, "Test failed: \(test)")
         }
     }
     
@@ -310,12 +315,12 @@ class EvaluatorTests: XCTestCase {
         // integral digits are concatenated
         // fractional digits are added
         struct Overrider: FunctionOverrider {
-            private func overrideFunction(function: String, arguments: Array<Expression>, substitutions: Substitutions, evaluator: Evaluator) throws -> Double? {
-                guard function.lowercaseString == BuiltInOperator.ImplicitMultiply.rawValue.lowercaseString else { return nil }
-                guard arguments.count == 2 else { return nil }
+            func overrideFunction(_ function: String, state: EvaluationState) throws -> Double? {
+                guard function.lowercased() == BuiltInOperator.implicitMultiply.rawValue.lowercased() else { return nil }
+                guard state.arguments.count == 2 else { return nil }
                 
-                let firstArg = try evaluator.evaluate(arguments[0], substitutions: substitutions)
-                let secondArg = try evaluator.evaluate(arguments[1], substitutions: substitutions)
+                let firstArg = try state.evaluator.evaluate(state.arguments[0], substitutions: state.substitutions)
+                let secondArg = try state.evaluator.evaluate(state.arguments[1], substitutions: state.substitutions)
                 
                 let integralPartOfFirstArgument = floor(firstArg)
                 let fractionalPartOfFirstArgument = firstArg - integralPartOfFirstArgument
@@ -333,10 +338,10 @@ class EvaluatorTests: XCTestCase {
             "(2+3)2": 52,
             "789(241)": 789241,
             "1234567(1000)": 12345671000,
-            "3π": 30+M_PI,
-            "π 3": 30+M_PI,
+            "3π": 30+Double.pi,
+            "π 3": 30+Double.pi,
             "1.1(2.2)": 12.3,
-            "π π": 33 + ((M_PI - 3) * 2)
+            "π π": 33 + ((Double.pi - 3) * 2)
         ]
         
         for (test, expectedValue) in tests {
